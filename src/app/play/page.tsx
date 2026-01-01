@@ -120,6 +120,28 @@ function PlayPageClient() {
 
   // 网页全屏状态 - 控制导航栏的显示隐藏
   const [isWebFullscreen, setIsWebFullscreen] = useState(false);
+  // 原生全屏状态
+  const [isNativeFullscreen, setIsNativeFullscreen] = useState(false);
+
+  // 监听浏览器原生全屏事件
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!document.fullscreenElement;
+      setIsNativeFullscreen(isFullscreen);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
 
   // 跳过片头片尾配置
   const [skipConfig, setSkipConfig] = useState<{
@@ -4623,6 +4645,73 @@ function PlayPageClient() {
       artPlayerRef.current.on('fullscreenWeb', (isFullscreen: boolean) => {
         console.log('网页全屏状态变化:', isFullscreen);
         setIsWebFullscreen(isFullscreen);
+      });
+
+      // 添加全屏快进快退按钮
+      artPlayerRef.current.layers.add({
+        name: 'seek-buttons',
+        html: `
+          <div class="seek-buttons-container" style="display: none;">
+            <button class="seek-button seek-backward" style="position: fixed; left: 20px; top: 40%; transform: translateY(-50%); width: 48px; height: 48px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 9999; transition: opacity 0.2s;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M11 18V6l-8.5 6 8.5 6zm.5-6l8.5 6V6l-8.5 6z" fill="white"/>
+              </svg>
+            </button>
+            <button class="seek-button seek-forward" style="position: fixed; right: 20px; top: 40%; transform: translateY(-50%); width: 48px; height: 48px; background: rgba(0,0,0,0.7); border: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 9999; transition: opacity 0.2s;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" fill="white"/>
+              </svg>
+            </button>
+          </div>
+        `,
+        mounted: ($el: HTMLElement) => {
+          const container = $el.querySelector('.seek-buttons-container') as HTMLElement;
+          const backwardBtn = $el.querySelector('.seek-backward') as HTMLElement;
+          const forwardBtn = $el.querySelector('.seek-forward') as HTMLElement;
+
+          // 快退5秒
+          backwardBtn.onclick = () => {
+            if (artPlayerRef.current) {
+              artPlayerRef.current.currentTime = Math.max(0, artPlayerRef.current.currentTime - 5);
+            }
+          };
+
+          // 快进5秒
+          forwardBtn.onclick = () => {
+            if (artPlayerRef.current) {
+              artPlayerRef.current.currentTime = Math.min(artPlayerRef.current.duration, artPlayerRef.current.currentTime + 5);
+            }
+          };
+
+          // 监听全屏状态变化
+          const updateVisibility = () => {
+            const isFullscreen = artPlayerRef.current?.fullscreen || artPlayerRef.current?.fullscreenWeb || !!document.fullscreenElement;
+            const isMobile = Math.min(window.innerWidth, window.innerHeight) < 768;
+            const controlsVisible = !artPlayerRef.current?.template?.$player?.classList.contains('art-hide-cursor');
+
+            if (container) {
+              const shouldShow = isFullscreen && isMobile && controlsVisible;
+              container.style.display = shouldShow ? 'block' : 'none';
+            }
+          };
+
+          artPlayerRef.current.on('fullscreen', updateVisibility);
+          artPlayerRef.current.on('fullscreenWeb', updateVisibility);
+          document.addEventListener('fullscreenchange', updateVisibility);
+          window.addEventListener('resize', updateVisibility);
+
+          // 监听鼠标移动和视频事件来检测控件显示/隐藏
+          artPlayerRef.current.on('video:timeupdate', updateVisibility);
+          if (artPlayerRef.current.template?.$player) {
+            const observer = new MutationObserver(updateVisibility);
+            observer.observe(artPlayerRef.current.template.$player, {
+              attributes: true,
+              attributeFilter: ['class']
+            });
+          }
+
+          updateVisibility();
+        },
       });
 
       // 监听视频可播放事件，这时恢复播放进度更可靠
